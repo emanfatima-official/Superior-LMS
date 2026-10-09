@@ -208,17 +208,9 @@ app.get(
 
 // ======================================================
 // START SERVER
-// ======================================================
-
-const PORT =
-  process.env.PORT ||
-  5000;
-
-// Local pe chalane ke liye; Vercel pe listen nahi karna
 if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
 module.exports = app;
-);
