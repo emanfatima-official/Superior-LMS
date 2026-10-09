@@ -7,7 +7,7 @@ import axios from "axios";
 const API_BASE_URL =
   import.meta.env
     .VITE_API_BASE_URL ||
-  "http://https://superior-lms-ten.vercel.app/api";
+  "https://superior-lms-ten.vercel.app/api";
 
 // ======================================================
 // STORAGE KEYS
