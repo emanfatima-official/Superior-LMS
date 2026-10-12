@@ -588,161 +588,104 @@ export default function ImportModal({
   // COMMIT IMPORT
   // ====================================================
 
-const commitImport =
-  async () => {
-    if (
-      !validRows.length
-    ) {
-      setError(
-        "There are no valid rows to import."
+  const commitImport =
+    async () => {
+      if (
+        !ensureDefinition()
+      ) {
+        return;
+      }
+
+      if (
+        !validRows.length
+      ) {
+        setError(
+          "There are no valid rows to import."
+        );
+
+        return;
+      }
+
+      setError("");
+
+      setSuccess("");
+
+      setImporting(
+        true
       );
 
-      return;
-    }
-
-    setError("");
-    setSuccess("");
-    setImporting(
-      true
-    );
-
-    try {
-      /*
-       * Build a map of the ORIGINAL rows parsed directly
-       * from Excel/CSV.
-       *
-       * This is especially important for teacher passwords.
-       * We do NOT want the password to depend on the
-       * validate -> response -> commit round trip.
-       */
-      const originalRowsByNumber =
-        new Map(
-          parsedRows.map(
+      try {
+        const records =
+          validRows.map(
             (
               row
-            ) => [
-              String(
-                row.row_number
-              ),
-              row,
-            ]
+            ) =>
+              row.record ||
+              row
+          );
+
+        const response =
+          await commitImportRows(
+            config.key,
+            records
+          );
+
+        const responseData =
+          response?.data?.data ??
+          response?.data ??
+          response;
+
+        const results =
+          safeArray(
+            responseData?.results ||
+              responseData
+          );
+
+        setImportResults(
+          results
+        );
+
+        const succeeded =
+          results.filter(
+            (
+              row
+            ) =>
+              row.success ===
+                true ||
+              row.status ===
+                "success"
+          ).length;
+
+        const failed =
+          results.length -
+          succeeded;
+
+        setSuccess(
+          `${succeeded} ${pluralLower} imported successfully${
+            failed
+              ? ` · ${failed} failed`
+              : ""
+          }.`
+        );
+
+        onImported?.(
+          responseData
+        );
+      } catch (
+        importError
+      ) {
+        setError(
+          messageFromError(
+            importError,
+            "Import failed."
           )
         );
-
-      const rowsForCommit =
-        validRows.map(
-          (
-            validationRow
-          ) => {
-            const validatedRecord =
-              validationRow.record ||
-              validationRow;
-
-            /*
-             * STUDENTS:
-             * Keep the existing/current behavior exactly.
-             */
-            if (
-              definition.key !==
-              "teachers"
-            ) {
-              return validatedRecord;
-            }
-
-            /*
-             * TEACHERS:
-             * Get the original Excel/CSV row.
-             */
-            const originalRow =
-              originalRowsByNumber.get(
-                String(
-                  validationRow.row_number
-                )
-              );
-
-            /*
-             * Merge the validated record with original
-             * spreadsheet password.
-             *
-             * This guarantees:
-             *
-             * Excel:
-             * 35202-1234567-1
-             *
-             * Commit:
-             * 35202-1234567-1
-             *
-             * No CNIC normalization is applied to password.
-             */
-            return {
-              ...validatedRecord,
-
-              password:
-                originalRow?.password ??
-                validatedRecord?.password ??
-                null,
-            };
-          }
+      } finally {
+        setImporting(
+          false
         );
-
-      const response =
-        await commitImportRows(
-          definition.key,
-          rowsForCommit
-        );
-
-      const results =
-        safeArray(
-          response?.data
-            ?.results ||
-            response?.data
-        );
-
-      setImportResults(
-        results
-      );
-
-      const succeeded =
-        results.filter(
-          (
-            row
-          ) =>
-            row.success
-        ).length;
-
-      const failed =
-        results.length -
-        succeeded;
-
-      setSuccess(
-        `${succeeded} ${
-          definition.pluralLower ||
-          "record(s)"
-        } imported successfully${
-          failed
-            ? ` · ${failed} failed`
-            : ""
-        }.`
-      );
-
-      onImported?.(
-        response?.data
-      );
-    } catch (
-      importError
-    ) {
-      setError(
-        messageFromError(
-          importError,
-          "Import failed."
-        )
-      );
-    } finally {
-      setImporting(
-        false
-      );
-    }
-  };
+      }
+    };
 
   // ====================================================
   // IMAGE SELECTION
