@@ -2035,9 +2035,15 @@ function Attendance() {
             (
               row
             ) => ({
-              name:
-                row.course_code ||
-                row.name,
+              name: [
+                row.course_code || row.name,
+                row.program?.code,
+                row.semester?.semester_number
+                  ? `S${row.semester.semester_number}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" · "),
 
               rate:
                 row.rate,
@@ -2093,7 +2099,10 @@ function Attendance() {
               .toLowerCase()
               .includes(
                 query
-              )
+              ) ||
+            String(row.class_label || "")
+              .toLowerCase()
+              .includes(query)
         );
       },
       [
@@ -3244,7 +3253,7 @@ function Attendance() {
                 </h2>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  Attendance performance across course assignments
+                  Attendance performance per course, class (program / semester) and teacher
                 </p>
               </div>
 
@@ -3291,7 +3300,7 @@ function Attendance() {
                   <table
                     className="
                       w-full
-                      min-w-[900px]
+                      min-w-[1100px]
                       table-fixed
                       text-left
                       text-sm
@@ -3308,35 +3317,31 @@ function Attendance() {
                       "
                     >
                       <tr>
-                        <th className="w-[25%] px-4 py-3">
+                        <th className="w-[20%] px-4 py-3">
                           Course
                         </th>
-
-                        <th className="w-[18%] px-4 py-3">
+                        <th className="w-[21%] px-4 py-3">
+                          Program / Semester
+                        </th>
+                        <th className="w-[14%] px-4 py-3">
                           Teacher
                         </th>
-
-                        <th className="w-[10%] px-4 py-3">
+                        <th className="w-[8%] px-4 py-3">
                           Sessions
                         </th>
-
-                        <th className="w-[10%] px-4 py-3">
+                        <th className="w-[8%] px-4 py-3">
                           Present
                         </th>
-
-                        <th className="w-[10%] px-4 py-3">
+                        <th className="w-[8%] px-4 py-3">
                           Absent
                         </th>
-
-                        <th className="w-[10%] px-4 py-3">
+                        <th className="w-[7%] px-4 py-3">
                           Late
                         </th>
-
-                        <th className="w-[10%] px-4 py-3">
+                        <th className="w-[7%] px-4 py-3">
                           Leave
                         </th>
-
-                        <th className="w-[12%] px-4 py-3">
+                        <th className="w-[7%] px-4 py-3">
                           Rate
                         </th>
                       </tr>
@@ -3348,9 +3353,7 @@ function Attendance() {
                           row
                         ) => (
                           <tr
-                            key={
-                              row.course_assignment_id
-                            }
+                            key={`${row.course_assignment_id}:${row.class_key || ""}`}
                             className="
                               border-t
                               border-slate-100
@@ -3375,6 +3378,33 @@ function Attendance() {
                                 {row.course_code ||
                                   "—"}
                               </p>
+                            </td>
+
+                            <td
+                              className="px-4 py-4"
+                              title={row.class_label || ""}
+                            >
+                              <p className="truncate font-medium text-slate-800 dark:text-slate-200">
+                                {row.program?.name || "—"}
+                              </p>
+
+                              <p className="truncate text-xs text-slate-400">
+                                {[
+                                  row.semester?.name,
+                                  row.batch?.start_year && row.batch?.end_year
+                                    ? `${row.batch.start_year}-${row.batch.end_year}`
+                                    : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "—"}
+                              </p>
+
+                              {row.student_count > 0 && (
+                                <p className="truncate text-[11px] text-slate-400">
+                                  {row.student_count} student
+                                  {row.student_count === 1 ? "" : "s"}
+                                </p>
+                              )}
                             </td>
 
                             <td className="truncate px-4 py-4">

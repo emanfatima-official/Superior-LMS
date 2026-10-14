@@ -1393,6 +1393,333 @@ const buildStudentSummaries = (
 };
 
 // ======================================================
+// CLASS-WISE COURSE SUMMARY
+// One row per (course assignment x student class).
+// A "class" = program + batch + semester of the enrolled
+// students, so the same teacher/course taught to several
+// classes is NOT merged into one record anymore.
+// ======================================================
+
+const classKeyOf = (cls) =>
+  [
+    cls.program_id || "none",
+    cls.batch_id || "none",
+    cls.semester_id || "none",
+  ].join(":");
+
+const classOfStudent = (context, enrollment, student) => ({
+  program_id:
+    student?.program_id ||
+    context.course?.program_id ||
+    null,
+  batch_id:
+    enrollment?.batch_id ||
+    context.batch_id ||
+    null,
+  semester_id:
+    enrollment?.semester_id ||
+    context.semester_id ||
+    null,
+});
+
+const getClassMaps = async (dataset, classIds) => {
+  const [programs, semesters, batches] =
+    await Promise.all([
+      fetchInChunks({
+        table: "academic_programs",
+        select:
+          "id,name,code,department_id,status",
+        column: "id",
+        values: [...classIds.programs],
+      }),
+      fetchInChunks({
+        table: "academic_semesters",
+        select:
+          "id,name,semester_number,program_id,status",
+        column: "id",
+        values: [...classIds.semesters],
+      }),
+      fetchInChunks({
+        table: "academic_batches",
+        select:
+          "id,start_year,end_year,status",
+        column: "id",
+        values: [...classIds.batches],
+      }),
+    ]);
+
+  return {
+    programMap: new Map(
+      programs.map((row) => [row.id, row])
+    ),
+    semesterMap: new Map(
+      semesters.map((row) => [row.id, row])
+    ),
+    batchMap: new Map(
+      batches.map((row) => [row.id, row])
+    ),
+  };
+};
+
+const buildClassCourseSummary = async (
+  dataset,
+  conductedSessions
+) => {
+  const conductedIds = new Set(
+    conductedSessions.map((row) =>
+      String(row.id)
+    )
+  );
+
+  // ---------------- group per assignment + class ----
+  const drafts = [];
+  const classIds = {
+    programs: new Set(),
+    semesters: new Set(),
+    batches: new Set(),
+  };
+
+  for (const context of dataset.contexts) {
+    const contextId = String(context.id);
+
+    const enrollmentByStudent = new Map();
+
+    for (const enrollment of dataset.enrollments) {
+      if (
+        String(
+          enrollment.course_assignment_id
+        ) === contextId &&
+        enrollment.student_id
+      ) {
+        enrollmentByStudent.set(
+          enrollment.student_id,
+          enrollment
+        );
+      }
+    }
+
+    const groups = new Map();
+
+    const ensureGroup = (cls) => {
+      const key = classKeyOf(cls);
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          cls,
+          records: [],
+          sessionKeys: new Set(),
+          students: new Set(),
+        });
+      }
+
+      return groups.get(key);
+    };
+
+    for (const [
+      studentId,
+      enrollment,
+    ] of enrollmentByStudent) {
+      ensureGroup(
+        classOfStudent(
+          context,
+          enrollment,
+          enrollment.student
+        )
+      ).students.add(studentId);
+    }
+
+    for (const record of dataset.records) {
+      if (
+        String(record.context?.id) !==
+        contextId
+      ) {
+        continue;
+      }
+
+      const enrollment =
+        enrollmentByStudent.get(
+          record.student_id
+        );
+
+      const group = ensureGroup(
+        classOfStudent(
+          context,
+          enrollment,
+          enrollment?.student ||
+            record.student
+        )
+      );
+
+      group.records.push(record);
+
+      if (record.attendance_session_id) {
+        if (
+          conductedIds.has(
+            String(
+              record.attendance_session_id
+            )
+          )
+        ) {
+          group.sessionKeys.add(
+            `s:${record.attendance_session_id}`
+          );
+        }
+      } else if (record.date) {
+        group.sessionKeys.add(
+          `d:${record.date}`
+        );
+      }
+    }
+
+    if (!groups.size) {
+      ensureGroup(
+        classOfStudent(
+          context,
+          null,
+          null
+        )
+      );
+    }
+
+    const assignmentSessions =
+      conductedSessions.filter(
+        (row) =>
+          String(
+            row.course_assignment_id
+          ) === contextId
+      ).length;
+
+    for (const group of groups.values()) {
+      if (group.cls.program_id) {
+        classIds.programs.add(
+          group.cls.program_id
+        );
+      }
+
+      if (group.cls.semester_id) {
+        classIds.semesters.add(
+          group.cls.semester_id
+        );
+      }
+
+      if (group.cls.batch_id) {
+        classIds.batches.add(
+          group.cls.batch_id
+        );
+      }
+
+      drafts.push({
+        context,
+        group,
+        // Only one class in this assignment: every
+        // conducted session belongs to it (old behaviour).
+        // Several classes: count only sessions in which
+        // THIS class actually has attendance marked.
+        sessions:
+          groups.size === 1
+            ? assignmentSessions
+            : group.sessionKeys.size,
+      });
+    }
+  }
+
+  const {
+    programMap,
+    semesterMap,
+    batchMap,
+  } = await getClassMaps(
+    dataset,
+    classIds
+  );
+
+  const rows = drafts.map(
+    ({ context, group, sessions }) => {
+      const program =
+        programMap.get(
+          group.cls.program_id
+        ) ||
+        context.program ||
+        null;
+
+      const semester =
+        semesterMap.get(
+          group.cls.semester_id
+        ) ||
+        context.semester ||
+        null;
+
+      const batch =
+        batchMap.get(
+          group.cls.batch_id
+        ) ||
+        context.batch ||
+        null;
+
+      const label = [
+        program?.code || program?.name,
+        semester?.name,
+        batchLabel(batch),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      return {
+        ...courseDescriptor(context),
+
+        program,
+        semester,
+        batch,
+
+        class_key: group.key,
+        class_label: label,
+        student_count:
+          group.students.size,
+
+        ...countStatuses(
+          group.records
+        ),
+
+        sessions,
+      };
+    }
+  );
+
+  return rows.sort((a, b) => {
+    const byCourse = String(
+      a.name || ""
+    ).localeCompare(
+      String(b.name || "")
+    );
+
+    if (byCourse !== 0) {
+      return byCourse;
+    }
+
+    const byProgram = String(
+      a.program?.name || ""
+    ).localeCompare(
+      String(b.program?.name || "")
+    );
+
+    if (byProgram !== 0) {
+      return byProgram;
+    }
+
+    return (
+      Number(
+        a.semester?.semester_number ||
+          0
+      ) -
+      Number(
+        b.semester?.semester_number ||
+          0
+      )
+    );
+  });
+};
+
+// ======================================================
 // OVERVIEW
 // ======================================================
 
@@ -1457,44 +1784,9 @@ const getOverview =
       );
 
     const courseSummary =
-      dataset.contexts.map(
-        (context) => {
-          const contextSessions =
-            conductedSessions.filter(
-              (session) =>
-                String(
-                  session.course_assignment_id
-                ) ===
-                String(
-                  context.id
-                )
-            );
-
-          const rows =
-            dataset.records.filter(
-              (record) =>
-                String(
-                  record.context
-                    ?.id
-                ) ===
-                String(
-                  context.id
-                )
-            );
-
-          return {
-            ...courseDescriptor(
-              context
-            ),
-
-            ...countStatuses(
-              rows
-            ),
-
-            sessions:
-              contextSessions.length,
-          };
-        }
+      await buildClassCourseSummary(
+        dataset,
+        conductedSessions
       );
 
     const trendMap =
@@ -2833,6 +3125,10 @@ const getExportData =
               ?.full_name ||
             "",
 
+          Program:
+            row.program
+              ?.name ||
+            "",
           Batch:
             batchLabel(
               row.batch
@@ -2843,6 +3139,8 @@ const getExportData =
               ?.name ||
             "",
 
+          Students:
+            row.student_count,
           Sessions:
             row.sessions,
 
