@@ -1226,9 +1226,17 @@ const getOptions =
   async (
     filters = {}
   ) => {
+    // The course dropdown must always list ALL courses of the
+    // selected class. Only the student list depends on the
+    // selected course, so it is filtered below instead.
+    const {
+      course_assignment_id: selectedCourseId,
+      ...datasetFilters
+    } = filters;
+
     const dataset =
       await buildDataset(
-        filters,
+        datasetFilters,
         {
           includeRecords:
             false,
@@ -1243,12 +1251,12 @@ const getOptions =
       of dataset.enrollments
     ) {
       if (
-        filters.course_assignment_id &&
+        selectedCourseId &&
         String(
           enrollment.course_assignment_id
         ) !==
           String(
-            filters.course_assignment_id
+            selectedCourseId
           )
       ) {
         continue;
